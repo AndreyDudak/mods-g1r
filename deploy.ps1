@@ -16,6 +16,7 @@ function Deploy-To($Label, $Dest) {
         New-Item -ItemType Directory -Force -Path $Dest | Out-Null
     }
     Copy-Item (Join-Path $StatEditorSrc "Scripts\*.lua") (Join-Path $Dest "Scripts\") -Force
+    Copy-Item (Join-Path $StatEditorSrc "StatEditorMod.ini") (Join-Path $Dest "StatEditorMod.ini") -Force
     Write-Host "[$Label] StatEditorMod -> $Dest"
 }
 

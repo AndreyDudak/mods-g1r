@@ -1,4 +1,5 @@
 local Console = require("console")
+local ModLog = require("modlog")
 
 local ChatConsole = {}
 
@@ -19,7 +20,7 @@ function ChatConsole.Close()
     end
     State.active = false
     State.buffer = ""
-    print("[StatEditorMod] Command line closed\n")
+    ModLog.Write("[StatEditorMod] Command line closed")
 end
 
 local function CloseOtherConsoles()
@@ -36,7 +37,7 @@ end
 
 local function PrintPrompt()
     local Prompt = State.buffer ~= "" and State.buffer or "(type command, Enter=run, Esc=close)"
-    print(string.format("[StatEditorMod Cmd]> %s\n", Prompt))
+    ModLog.Write(string.format("[StatEditorMod Cmd]> %s", Prompt))
 end
 
 local function Toggle()
@@ -48,9 +49,11 @@ local function Toggle()
     CloseOtherConsoles()
     State.active = true
     State.buffer = ""
-    print("[StatEditorMod] Command line open (Numpad 5). Example: lp 100 + Enter, Esc=close\n")
-    Console.PrintHelp(nil)
-    PrintPrompt()
+    ModLog.BeginBatch()
+    ModLog.Write("[StatEditorMod] Command line open (Numpad 5). Example: lp 100 + Enter, Esc=close")
+    Console.PrintStatAliases(nil)
+    ModLog.Write("[StatEditorMod Cmd]> (type command, Enter=run, Esc=close)")
+    ModLog.EndBatch()
 end
 
 local function RequireActive(Fn)
@@ -76,7 +79,7 @@ end
 local function Execute()
     local Line = State.buffer
     State.buffer = ""
-    print(string.format("[StatEditorMod Cmd] exec: %s\n", Line))
+    ModLog.Write(string.format("[StatEditorMod Cmd] exec: %s", Line))
     Console.ExecuteLine(Line, nil)
     if State.active then
         PrintPrompt()
@@ -148,6 +151,6 @@ for _, Entry in ipairs(DigitKeys) do
     end)
 end
 
-print("[StatEditorMod] Numpad 5 = command line (lp 100), Numpad 0 = mod guide\n")
+ModLog.Write("[StatEditorMod] Numpad 5 = command line (lp 100), Numpad 0 = mod guide")
 
 return ChatConsole

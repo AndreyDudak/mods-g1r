@@ -1,4 +1,5 @@
 local Stats = require("stats")
+local ModLog = require("modlog")
 
 local Inventory = {}
 
@@ -21,7 +22,7 @@ end
 
 local function Log(Message, Ar)
     local Line = "[StatEditorMod Inv] " .. Message
-    print(Line .. "\n")
+    ModLog.Write(Line)
     if Ar and type(Ar) == "userdata" and Ar:type() == "FOutputDevice" then
         Ar:Log(Line)
     end
@@ -1201,6 +1202,7 @@ function Inventory.DumpPosList(Ar)
             SlotCount = DEFAULT_SLOT_COUNT
         end
 
+        ModLog.BeginBatch()
         Log("--- inventory (ui pos = number at bottom of inventory) ---", Ar)
         Log(string.format("grid slots: %d  (use pos from this list, not internal id)", SlotCount), Ar)
 
@@ -1319,7 +1321,10 @@ function Inventory.DumpPosList(Ar)
                     return false
                 end)
             end
+        else
+            Log(string.format("Inventory list: %d items", #Rows), Ar)
         end
+        ModLog.EndBatch()
     end, Ar)
 end
 

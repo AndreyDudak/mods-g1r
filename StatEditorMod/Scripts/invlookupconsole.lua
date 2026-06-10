@@ -1,4 +1,5 @@
 local Inventory = require("inventory")
+local ModLog = require("modlog")
 
 local InvLookupConsole = {}
 
@@ -19,7 +20,7 @@ function InvLookupConsole.Close()
     end
     State.active = false
     State.buffer = ""
-    print("[StatEditorMod] Slot lookup line closed\n")
+    ModLog.Write("[StatEditorMod] Slot lookup line closed")
 end
 
 local function CloseOtherConsoles()
@@ -36,7 +37,7 @@ end
 
 local function PrintPrompt()
     local Prompt = State.buffer ~= "" and State.buffer or "(slot number, Enter=lookup, Esc=close)"
-    print(string.format("[StatEditorMod Slot]> %s\n", Prompt))
+    ModLog.Write(string.format("[StatEditorMod Slot]> %s", Prompt))
 end
 
 local function Toggle()
@@ -48,7 +49,7 @@ local function Toggle()
     CloseOtherConsoles()
     State.active = true
     State.buffer = ""
-    print("[StatEditorMod] Slot lookup open (Numpad 7). Example: 34 + Enter\n")
+    ModLog.Write("[StatEditorMod] Slot lookup open (Numpad 7). Example: 34 + Enter")
     Inventory.PrintLookupHelp(nil)
     PrintPrompt()
 end
@@ -76,7 +77,7 @@ end
 local function Execute()
     local Line = State.buffer
     State.buffer = ""
-    print(string.format("[StatEditorMod Slot] exec: %s\n", Line))
+    ModLog.Write(string.format("[StatEditorMod Slot] exec: %s", Line))
     Inventory.ExecuteLookupLine(Line, nil)
     if State.active then
         PrintPrompt()
@@ -113,6 +114,6 @@ for _, Entry in ipairs(DigitKeys) do
     end)
 end
 
-print("[StatEditorMod] Numpad 9 = inv pos list, Numpad 7 = lookup by pos\n")
+ModLog.Write("[StatEditorMod] Numpad 9 = inv pos list, Numpad 7 = lookup by pos")
 
 return InvLookupConsole

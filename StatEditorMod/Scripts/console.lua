@@ -1,10 +1,11 @@
 local Stats = require("stats")
+local ModLog = require("modlog")
 
 local Console = {}
 
 local function Log(Message, Ar)
     local Line = "[StatEditorMod] " .. Message
-    print(Line .. "\n")
+    ModLog.Write(Line)
     if Ar and type(Ar) == "userdata" and Ar:type() == "FOutputDevice" then
         Ar:Log(Line)
     end
@@ -31,6 +32,7 @@ local function RequirePlayer(Ar, Fn)
 end
 
 function Console.PrintModGuide(Ar)
+    ModLog.BeginBatch()
     Log("--- StatEditorMod ---", Ar)
     Log("Numpad 0: this guide", Ar)
     Log("Numpad 5: <stat> <value> + Enter  (e.g. lp 100)  Esc=close", Ar)
@@ -40,11 +42,41 @@ function Console.PrintModGuide(Ar)
     Log("Numpad 9: dump inventory list (open inventory tab first)", Ar)
     Log("Stat aliases: hp/mh, mp/mm, lp/sp, str, dex, lvl, exp/xp, tough, fatigue/mf, circle/magic/mc (0-6)", Ar)
     Log("Inventory pos = footer number (18/334), NOT internal id", Ar)
+    Log("StatEditorMod.ini: ShowInGameHud=true/false (in-game text; log always on)", Ar)
     Log("After .lua edits: Ctrl+R reloads Lua (full game restart if something breaks)", Ar)
+    ModLog.EndBatch()
 end
 
 function Console.PrintHelp(Ar)
     Console.PrintModGuide(Ar)
+end
+
+local function CollectAllAliases()
+    local Seen = {}
+    local List = {}
+
+    local function Add(Alias)
+        if Alias == nil or Alias == "" or Seen[Alias] then
+            return
+        end
+        Seen[Alias] = true
+        table.insert(List, Alias)
+    end
+
+    for _, Def in ipairs(Stats.STAT_DEFS) do
+        Add(string.lower(Def.label))
+    end
+    for Alias in pairs(Stats.ALIASES) do
+        Add(Alias)
+    end
+
+    table.sort(List)
+    return List
+end
+
+function Console.PrintStatAliases(Ar)
+    local Aliases = CollectAllAliases()
+    Log(string.format("aliases: %s", table.concat(Aliases, ", ")), Ar)
 end
 
 local function HandleSet(StatName, ValueText, Ar)
@@ -82,15 +114,20 @@ end
 
 function Console.DumpAll(Ar)
     RequirePlayer(Ar, function(Character, Output)
+        ModLog.BeginBatch()
         Log("--- stats ---", Output)
+        local Count = 0
         for _, Def in ipairs(Stats.STAT_DEFS) do
             local Value, Err = Stats.ReadStat(Character, Def.set, Def.attr)
             if Value ~= nil then
                 Log(string.format("%s = %.2f", Def.label, Value), Output)
+                Count = Count + 1
             else
                 Log(string.format("%s = ? (%s)", Def.label, Err or "read failed"), Output)
             end
         end
+        Log(string.format("Stats dump: %d values", Count), Output)
+        ModLog.EndBatch()
     end)
 end
 

@@ -1,4 +1,5 @@
 local Inventory = require("inventory")
+local ModLog = require("modlog")
 
 local InvConsole = {}
 
@@ -19,7 +20,7 @@ function InvConsole.Close()
     end
     State.active = false
     State.buffer = ""
-    print("[StatEditorMod] Inventory command line closed\n")
+    ModLog.Write("[StatEditorMod] Inventory command line closed")
 end
 
 local function CloseOtherConsoles()
@@ -36,7 +37,7 @@ end
 
 local function PrintPrompt()
     local Prompt = State.buffer ~= "" and State.buffer or "(pos count, Enter=run, Esc=close)"
-    print(string.format("[StatEditorMod Inv]> %s\n", Prompt))
+    ModLog.Write(string.format("[StatEditorMod Inv]> %s", Prompt))
 end
 
 local function Toggle()
@@ -48,7 +49,7 @@ local function Toggle()
     CloseOtherConsoles()
     State.active = true
     State.buffer = ""
-    print("[StatEditorMod] Inventory command line open (Numpad 8). Example: 34 55 or 34 -10 + Enter\n")
+    ModLog.Write("[StatEditorMod] Inventory command line open (Numpad 8). Example: 34 55 or 34 -10 + Enter")
     Inventory.PrintHelp(nil)
     PrintPrompt()
 end
@@ -76,7 +77,7 @@ end
 local function Execute()
     local Line = State.buffer
     State.buffer = ""
-    print(string.format("[StatEditorMod Inv] exec: %s\n", Line))
+    ModLog.Write(string.format("[StatEditorMod Inv] exec: %s", Line))
     Inventory.ExecuteLine(Line, nil)
     if State.active then
         PrintPrompt()
@@ -125,6 +126,6 @@ for _, Entry in ipairs(DigitKeys) do
     end)
 end
 
-print("[StatEditorMod] Numpad 8 = inventory commands (34 55, 34 -10)\n")
+ModLog.Write("[StatEditorMod] Numpad 8 = inventory commands (34 55, 34 -10)")
 
 return InvConsole
