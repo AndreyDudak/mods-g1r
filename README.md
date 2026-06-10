@@ -22,6 +22,8 @@ UE4SS Lua mods for **Gothic 1 Remake** (G1R).
 
 ## Mods
 
+See [`specs/G1R-MODDING-NOTES.md`](specs/G1R-MODDING-NOTES.md) for reverse-engineering notes, API findings, and setup details.
+
 ### StatEditorMod
 
 In-game stat and inventory editor via numpad command lines. Output goes to `UE4SS.log`.
