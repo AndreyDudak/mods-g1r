@@ -1,3 +1,8 @@
 .DS_Store
 Thumbs.db
 *.log
+*.dmp
+imgui.ini
+
+# Local UE4SS test install (not part of the published mod)
+ue4ss/

@@ -2,15 +2,28 @@
 
 UE4SS Lua mods for **Gothic 1 Remake** (G1R).
 
+**Dev project:** `D:\project\games\mods\Gothic_Remake`  
+**GitHub:** https://github.com/AndreyDudak/mods-g1r
+
+## Project layout
+
+```
+Gothic_Remake/
+  StatEditorMod/Scripts/   <- edit here (tracked by git)
+  specs/                   <- modding notes
+  ue4ss/                   <- local test install (gitignored)
+  deploy.ps1               <- copy mod into ue4ss / Steam
+```
+
 ## Requirements
 
 - [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) installed in `G1R/Binaries/Win64/ue4ss/`
 - `Mods/shared/UEHelpers/` (ships with UE4SS)
 - A loaded save, in-game (not main menu)
 
-## Install
+## Install (players)
 
-1. Copy mod folder(s) into:
+1. Copy `StatEditorMod/` into:
    ```
    G1R/Binaries/Win64/ue4ss/Mods/
    ```
@@ -19,6 +32,26 @@ UE4SS Lua mods for **Gothic 1 Remake** (G1R).
    StatEditorMod : 1
    ```
 3. Reload Lua: **Ctrl+R** (or restart the game if needed).
+
+## Develop
+
+From `D:\project\games\mods\Gothic_Remake`:
+
+```powershell
+# deploy to local ue4ss test folder
+.\deploy.ps1
+
+# deploy to Steam install too
+.\deploy.ps1 -Steam
+```
+
+Then **Ctrl+R** in game to reload Lua.
+
+```powershell
+git add -A
+git commit -m "..."
+git push
+```
 
 ## Mods
 
