@@ -42,7 +42,6 @@ function Console.PrintModGuide(Ar)
     Log("Numpad 9: dump inventory list (open inventory tab first)", Ar)
     Log("Stat aliases: hp/mh, mp/mm, lp/sp, str, dex, lvl, exp/xp, tough, fatigue/mf, circle/magic/mc (0-6)", Ar)
     Log("Inventory pos = footer number (18/334), NOT internal id", Ar)
-    Log("StatEditorMod.ini: ShowInGameHud=true/false (in-game text; log always on)", Ar)
     Log("After .lua edits: Ctrl+R reloads Lua (full game restart if something breaks)", Ar)
     ModLog.EndBatch()
 end

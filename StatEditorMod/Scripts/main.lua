@@ -26,6 +26,7 @@ RegisterHook("/Script/Engine.PlayerController:ClientRestart", function(self, New
     local Pawn = NewPawn:get()
     ExecuteInGameThread(function()
         Stats.SetPlayerCache(Controller, Pawn)
+        Notifications.ClearCache()
     end)
 end)
 
@@ -33,7 +34,6 @@ RegisterLoadMapPostHook(function()
     ExecuteInGameThread(function()
         Stats.ClearPlayerCache()
         Notifications.ClearCache()
-        ModLog.ReloadConfig()
     end)
 end)
 

@@ -3,7 +3,7 @@ local Stats = require("stats")
 
 local Notifications = {}
 
--- Screen position for mod messages (top-right avoids inventory/stats on the left).
+-- Top-right position (worked before config.ini changes).
 local Layout = {
     AnchorMinX = 1.0,
     AnchorMinY = 0.0,
@@ -21,6 +21,7 @@ local Cache = {
     MagicLib = nil,
     LayoutLib = nil,
     SimpleTextWidget = nil,
+    DebugOnce = false,
 }
 
 local function IsValidUObject(Obj)
@@ -140,20 +141,6 @@ local function ConfigureTextBlock(TextBlock)
         TextBlock:SetMinDesiredWidth(520.0)
         TextBlock:SetJustification(0)
     end)
-
-    local LayoutLib = GetLayoutLib()
-    if not IsValidUObject(LayoutLib) then
-        return
-    end
-
-    local Ok, Slot = pcall(function()
-        return LayoutLib:SlotAsCanvasSlot(TextBlock)
-    end)
-    if Ok and IsValidUObject(Slot) then
-        pcall(function()
-            Slot:SetSize(MakeVector2D(520.0, 420.0))
-        end)
-    end
 end
 
 local function ApplyMessageLayout(Widget)
@@ -219,6 +206,10 @@ end
 local function TryShowSimpleTextWidget(Message)
     local Widget = GetSimpleTextWidget()
     if not Widget then
+        if not Cache.DebugOnce then
+            Cache.DebugOnce = true
+            print("[StatEditorMod][HUD] widget not found (need save + world)\n")
+        end
         return false
     end
 
@@ -227,11 +218,20 @@ local function TryShowSimpleTextWidget(Message)
         return false
     end
 
-    local Ok = pcall(function()
-        ApplyMessageLayout(Widget)
+    local Ok, Err = pcall(function()
         Widget:ShowSimpleTextMessage(Text)
-        ApplyMessageLayout(Widget)
     end)
+    if Ok then
+        pcall(ApplyMessageLayout, Widget)
+        if not Cache.DebugOnce then
+            Cache.DebugOnce = true
+            local NameOk, Name = pcall(function() return Widget:GetFullName() end)
+            print(string.format("[StatEditorMod][HUD] ok via %s\n", NameOk and Name or "?"))
+        end
+    elseif not Cache.DebugOnce then
+        Cache.DebugOnce = true
+        print("[StatEditorMod][HUD] ShowSimpleTextMessage failed: " .. tostring(Err) .. "\n")
+    end
     return Ok
 end
 
@@ -282,6 +282,7 @@ end
 function Notifications.ClearCache()
     Cache.SimpleTextWidget = nil
     Cache.LayoutLib = nil
+    Cache.DebugOnce = false
 end
 
 return Notifications

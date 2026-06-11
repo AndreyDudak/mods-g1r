@@ -1,5 +1,4 @@
 local Notifications = require("notifications")
-local Config = require("config")
 
 local ModLog = {}
 
@@ -27,7 +26,7 @@ local function TrimHudBlock(Message)
 end
 
 local function PushHudLine(Line)
-    if not Config.IsInGameHudEnabled() or Line == "" then
+    if Line == "" then
         return
     end
 
@@ -57,9 +56,7 @@ function ModLog.EndBatch()
 
     BatchDepth = BatchDepth - 1
     if BatchDepth == 0 and #BatchLines > 0 then
-        if Config.IsInGameHudEnabled() then
-            Notifications.TryShow(TrimHudBlock(table.concat(BatchLines, "\n")))
-        end
+        Notifications.TryShow(TrimHudBlock(table.concat(BatchLines, "\n")))
         BatchLines = {}
     end
 end
@@ -72,10 +69,6 @@ function ModLog.Write(Message)
     print(Text)
 
     PushHudLine(TrimHudLine(Text))
-end
-
-function ModLog.ReloadConfig()
-    Config.Load()
 end
 
 return ModLog

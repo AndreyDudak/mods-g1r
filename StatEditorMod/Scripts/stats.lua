@@ -178,6 +178,205 @@ local function FindClass(Path)
     return nil
 end
 
+local function ClassNameFromSetPath(SetPath)
+    return SetPath and SetPath:match("([^%.]+)$") or nil
+end
+
+local function CollectAbilitySystems(Character)
+    local List = {}
+    local Seen = {}
+
+    local function Add(ASC)
+        if IsValidUObjectSafe(ASC) and not Seen[ASC] then
+            Seen[ASC] = true
+            table.insert(List, ASC)
+        end
+    end
+
+    Add(GetAbilitySystem(Character))
+
+    local Mesh = SafeGetMember(Character, "Mesh")
+    Add(SafeGetMember(Mesh, "AbilityComp"))
+
+    local State = Stats.GetCharacterState(Character)
+    Add(SafeGetMember(State, "AbilitySystemComponent"))
+
+    return List
+end
+
+local function FindSpawnedAttributeSet(Character, SetPath)
+    local Want = ClassNameFromSetPath(SetPath)
+    if not Want then
+        return nil
+    end
+
+    for _, ASC in ipairs(CollectAbilitySystems(Character)) do
+        local Found = nil
+        pcall(function()
+            ASC.SpawnedAttributes:ForEach(function(_, Elem)
+                if Found then
+                    return
+                end
+                local Set = Elem:get()
+                if not IsValidUObjectSafe(Set) then
+                    return
+                end
+                local Ok, ClassName = pcall(function()
+                    return Set:GetClass():GetFName():ToString()
+                end)
+                if Ok and ClassName == Want then
+                    Found = Set
+                end
+            end)
+        end)
+        if Found then
+            return Found
+        end
+    end
+
+    return nil
+end
+
+local function WriteAttributeSetField(AttrSet, AttrName, NewValue)
+    local Wrote = false
+    pcall(function()
+        AttrSet[AttrName].BaseValue = NewValue
+        Wrote = true
+    end)
+    pcall(function()
+        AttrSet[AttrName].CurrentValue = NewValue
+        Wrote = true
+    end)
+    return Wrote
+end
+
+local BarProp = { Health = "W_HealthBar", Mana = "W_ManaBar", MaxHealth = "W_HealthBar", MaxMana = "W_ManaBar" }
+
+local function FullName(Obj)
+    return tostring(SafeCallMethod(Obj, "GetFullName") or "")
+end
+
+local function GetPlayerHudWidget()
+    local OkOne, One = pcall(function()
+        return FindFirstOf("Player_Widget_C")
+    end)
+    if OkOne and IsValidUObjectSafe(One) then
+        local Full = FullName(One)
+        if not string.find(Full, "Default__", 1, true)
+            and string.find(Full, "Transient", 1, true) == nil then
+            return One
+        end
+    end
+
+    local List = nil
+    local OkAll, All = pcall(function()
+        return FindAllOf("Player_Widget_C")
+    end)
+    if OkAll and type(All) == "table" then
+        List = All
+    else
+        local OkOne, One = pcall(function()
+            return FindFirstOf("Player_Widget_C")
+        end)
+        if OkOne and IsValidUObjectSafe(One) then
+            List = { One }
+        end
+    end
+    if not List then
+        return nil
+    end
+
+    local function Pick(Pred)
+        for _, Widget in ipairs(List) do
+            if IsValidUObjectSafe(Widget)
+                and not string.find(FullName(Widget), "Default__", 1, true)
+                and Pred(Widget) then
+                return Widget
+            end
+        end
+        return nil
+    end
+
+    return Pick(function(Widget)
+        return string.find(FullName(Widget), "Player_UI", 1, true) ~= nil
+            and string.find(FullName(Widget), "Transient", 1, true) == nil
+    end) or Pick(function(Widget)
+        return string.find(FullName(Widget), "Transient", 1, true) == nil
+    end)
+end
+
+local function SyncResourceBar(AttrName, CurrentValue, MaxValue)
+    local BarKey = BarProp[AttrName]
+    if not BarKey or not CurrentValue or not MaxValue or MaxValue <= 0 then
+        return
+    end
+
+    local PlayerWidget = GetPlayerHudWidget()
+    if not IsValidUObjectSafe(PlayerWidget) then
+        return
+    end
+
+    local Bar = SafeGetMember(PlayerWidget, BarKey)
+    if not IsValidUObjectSafe(Bar) then
+        return
+    end
+
+    local Pct = CurrentValue / MaxValue
+    pcall(function()
+        Bar.m_GameplayAttributeCurrentValue = CurrentValue
+        Bar.m_GameplayAttributeMaxValue = MaxValue
+        Bar.m_GameplayAttributeCurrentPercent = Pct
+        Bar.m_GameplayAttributeInterpolatedPercent = Pct
+    end)
+
+    for _, Name in ipairs({ "Update Value", "UpdateValue" }) do
+        local Ok = pcall(function()
+            Bar[Name](Bar)
+        end)
+        if Ok then
+            break
+        end
+    end
+end
+
+local function SyncHudAfterWrite(AttrSet, SetPath, AttrName)
+    if SetPath ~= "/Script/G1R.AttributeSet_Health" and SetPath ~= "/Script/G1R.AttributeSet_Mana" then
+        return
+    end
+
+    local CurrentName = AttrName
+    local MaxName = AttrName
+    if AttrName == "Health" then
+        MaxName = "MaxHealth"
+    elseif AttrName == "MaxHealth" then
+        CurrentName = "Health"
+    elseif AttrName == "Mana" then
+        MaxName = "MaxMana"
+    elseif AttrName == "MaxMana" then
+        CurrentName = "Mana"
+    else
+        return
+    end
+
+    local Cur = SafeGetMember(SafeGetMember(AttrSet, CurrentName), "CurrentValue")
+    local Max = SafeGetMember(SafeGetMember(AttrSet, MaxName), "CurrentValue")
+    if type(Cur) == "number" and type(Max) == "number" then
+        SyncResourceBar(CurrentName, Cur, Max)
+    end
+end
+
+local function WriteAttributeDirect(Character, SetPath, AttrName, NewValue)
+    local AttrSet = FindSpawnedAttributeSet(Character, SetPath)
+    if not AttrSet then
+        return false, "attribute set not found on ASC"
+    end
+    if not WriteAttributeSetField(AttrSet, AttrName, NewValue) then
+        return false, "direct attribute write failed"
+    end
+    SyncHudAfterWrite(AttrSet, SetPath, AttrName)
+    return true, nil
+end
+
 local CachedPlayer = CreateInvalidObject()
 local CachedPlayerController = CreateInvalidObject()
 
@@ -297,31 +496,14 @@ function Stats.WriteAttribute(Character, SetPath, AttrName, NewValue)
         return false, "invalid character"
     end
 
-    local ASC = GetAbilitySystem(Character)
-    if not ASC then
-        return false, "no ASC (load save, be in world)"
-    end
-
-    local AttrNameF = UEHelpers.FindFName(AttrName)
-
-    local TryOk, Result = pcall(function()
-        return ASC:TrySetAttributeBaseValue(SetClass, AttrNameF, NewValue)
-    end)
-    if TryOk then
-        if Result then
-            return true, nil
-        end
-        return false, "TrySetAttributeBaseValue returned false"
-    end
-
-    local SetOk, SetErr = pcall(function()
-        ASC:SetAttributeBaseValue(SetClass, AttrNameF, NewValue)
-    end)
-    if SetOk then
+    -- G1R + UE4SS 3.x: ASC TrySet/Set crash ("Array failed invariants").
+    -- Direct AttributeSet write only (same approach as PassiveRegen).
+    local DirectOk, DirectErr = WriteAttributeDirect(Character, SetPath, AttrName, NewValue)
+    if DirectOk then
         return true, nil
     end
 
-    return false, tostring(SetErr)
+    return false, DirectErr or "direct attribute write failed"
 end
 
 function Stats.WriteStat(Character, SetPath, AttrName, NewValue)

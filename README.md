@@ -27,10 +27,7 @@ Gothic_Remake/
    ```
    G1R/Binaries/Win64/ue4ss/Mods/
    ```
-2. Enable in `Mods/mods.txt`:
-   ```
-   StatEditorMod : 1
-   ```
+2. Each mod folder includes an empty `enabled.txt` — UE4SS loads it automatically (no need to edit `mods.txt`).
 3. Reload Lua: **Ctrl+R** (or restart the game if needed).
 
 ## Develop

@@ -1,0 +1,35 @@
+---
+description: UE4SS mod layout and enablement for Gothic 1 Remake mods in this repo
+alwaysApply: true
+---
+
+# UE4SS mods (G1R)
+
+## Enable mods with enabled.txt, not mods.txt
+
+- Every mod in this repo must ship an empty `enabled.txt` in its root folder (`ModName/enabled.txt`).
+- Do **not** tell users to edit the game's `Mods/mods.txt` for our mods.
+- UE4SS loads any mod folder that contains `enabled.txt`; the file can be empty.
+
+## New mod checklist
+
+1. `ModName/Scripts/main.lua` (or `scripts/` if matching an existing mod — preserve casing)
+2. `ModName/ModName.ini` when config is needed
+3. `ModName/enabled.txt` (empty)
+4. Add `ModName` to the `$Mods` array in `deploy.ps1`
+
+## Deploy
+
+After **any** change to mod sources (`*.lua`, `*.ini`, `enabled.txt`) or `deploy.ps1`, the agent must run:
+
+```powershell
+.\deploy.ps1 -Steam
+```
+
+Do this automatically — do not ask the user to deploy manually. Remind them to **Ctrl+R** in game to reload Lua.
+
+`deploy.ps1` must copy Lua, `.ini`, and `enabled.txt`.
+
+## Trade-off
+
+`enabled.txt` bypasses `mods.txt` load order. Fine for standalone Lua mods here; document dependencies in mod comments if order ever matters.
