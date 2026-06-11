@@ -20,9 +20,9 @@ local function ApiPosToUserPos(ApiPos)
     return ApiPos + UI_POS_OFFSET
 end
 
-local function Log(Message, Ar)
+local function Log(Message, Ar, Direct)
     local Line = "[StatEditorMod Inv] " .. Message
-    ModLog.Write(Line)
+    ModLog.Write(Line, Direct == true)
     if Ar and type(Ar) == "userdata" and Ar:type() == "FOutputDevice" then
         Ar:Log(Line)
     end
@@ -1202,8 +1202,8 @@ function Inventory.DumpPosList(Ar)
             SlotCount = DEFAULT_SLOT_COUNT
         end
 
-        ModLog.BeginBatch()
-        Log("--- inventory (ui pos = number at bottom of inventory) ---", Ar)
+        ModLog.BeginBatch(true)
+        Log("--- inventory (ui pos = number at bottom of inventory) ---", Ar, true)
         Log(string.format("grid slots: %d  (use pos from this list, not internal id)", SlotCount), Ar)
 
         local Rows = {}

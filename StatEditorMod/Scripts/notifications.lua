@@ -234,6 +234,10 @@ local function TryShowInternal(Message)
     Notifications.Warmup()
 end
 
+function Notifications.Display(Message)
+    pcall(TryShowInternal, Message)
+end
+
 function Notifications.TryShow(Message)
     pcall(TryShowInternal, Message)
 end
