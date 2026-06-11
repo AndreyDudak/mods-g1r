@@ -9,16 +9,28 @@ require("chatconsole")
 require("invlookupconsole")
 require("invconsole")
 
+local function OnGameThread(Fn)
+    ExecuteInGameThread(function()
+        pcall(Fn)
+    end)
+end
+
 RegisterKeyBind(Key.NUM_ZERO, function()
-    Console.PrintModGuide(nil)
+    OnGameThread(function()
+        Console.PrintModGuide(nil)
+    end)
 end)
 
 RegisterKeyBind(Key.NUM_SIX, function()
-    Console.DumpAll(nil)
+    OnGameThread(function()
+        Console.DumpAll(nil)
+    end)
 end)
 
 RegisterKeyBind(Key.NUM_NINE, function()
-    Inventory.DumpPosList(nil)
+    OnGameThread(function()
+        Inventory.DumpPosList(nil)
+    end)
 end)
 
 RegisterHook("/Script/Engine.PlayerController:ClientRestart", function(self, NewPawn)
@@ -27,6 +39,7 @@ RegisterHook("/Script/Engine.PlayerController:ClientRestart", function(self, New
     ExecuteInGameThread(function()
         Stats.SetPlayerCache(Controller, Pawn)
         Notifications.ClearCache()
+        Notifications.Warmup()
     end)
 end)
 
@@ -34,6 +47,7 @@ RegisterLoadMapPostHook(function()
     ExecuteInGameThread(function()
         Stats.ClearPlayerCache()
         Notifications.ClearCache()
+        Notifications.Warmup()
     end)
 end)
 

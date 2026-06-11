@@ -6,7 +6,8 @@ local BatchDepth = 0
 local BatchLines = {}
 
 local HUD_SINGLE_MAX = 220
-local HUD_BLOCK_MAX = 3500
+local HUD_BLOCK_MAX = 1000
+local HUD_BATCH_LINE_MAX = 10
 
 local function TrimHudLine(Message)
     local Line = Message or ""
@@ -56,7 +57,15 @@ function ModLog.EndBatch()
 
     BatchDepth = BatchDepth - 1
     if BatchDepth == 0 and #BatchLines > 0 then
-        Notifications.TryShow(TrimHudBlock(table.concat(BatchLines, "\n")))
+        local Block = table.concat(BatchLines, "\n")
+        if #BatchLines > HUD_BATCH_LINE_MAX or #Block > HUD_BLOCK_MAX then
+            Notifications.TryShow(string.format(
+                "[StatEditorMod] %d lines -> UE4SS.log",
+                #BatchLines
+            ))
+        else
+            Notifications.TryShow(TrimHudBlock(Block))
+        end
         BatchLines = {}
     end
 end
