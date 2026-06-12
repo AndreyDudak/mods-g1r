@@ -80,10 +80,18 @@ function boost.plan(extra)
         effective = effective, skipped = skipped }
 end
 
+local cachedPlayerAttr = nil
+
 -- the player's lockpicking attribute set (the one under PlayerState).
 function boost.findPlayerAttrSet(engine)
+    if cachedPlayerAttr then
+        local ok, valid = pcall(function() return cachedPlayerAttr:IsValid() end)
+        if ok and valid then return cachedPlayerAttr end
+        cachedPlayerAttr = nil
+    end
     for _, s in ipairs(engine.liveInstances("AttributeSet_Lockpicking")) do
         if string.find(s:GetFullName(), "PlayerState", 1, true) then
+            cachedPlayerAttr = s
             return s
         end
     end

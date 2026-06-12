@@ -64,6 +64,14 @@ function Deploy-Mod($Label, $ModName, $Dest) {
 
     }
 
+    $Shared = Join-Path $Src "shared"
+
+    if (Test-Path $Shared) {
+
+        Copy-Item $Shared (Join-Path $Dest "shared") -Recurse -Force
+
+    }
+
 
 
     Write-Host "[$Label] $ModName -> $Dest"
@@ -79,6 +87,8 @@ $Mods = @(
     @{ Name = "MagicScaleMod"; Local = Join-Path $Root "ue4ss\Mods\MagicScaleMod"; Steam = "D:\Games\Steam\steamapps\common\Gothic 1 Remake\G1R\Binaries\Win64\ue4ss\Mods\MagicScaleMod" }
 
     @{ Name = "PassiveRegen"; Local = Join-Path $Root "ue4ss\Mods\PassiveRegen"; Steam = "D:\Games\Steam\steamapps\common\Gothic 1 Remake\G1R\Binaries\Win64\ue4ss\Mods\PassiveRegen" }
+
+    @{ Name = "LockpickSettings"; Local = Join-Path $Root "ue4ss\Mods\LockpickSettings"; Steam = "D:\Games\Steam\steamapps\common\Gothic 1 Remake\G1R\Binaries\Win64\ue4ss\Mods\LockpickSettings" }
 
 )
 

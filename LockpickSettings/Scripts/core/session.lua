@@ -767,7 +767,9 @@ function Session:tick()
     if s.flags.nextMove and s.plan and not s.nextMove and not s.plan.finished then
         s.nextMove = s.solver:plan(s)
     end
-    s.tinter:retint(s)
+    if s.flags.nextMove or s.flags.connections then
+        s.tinter:retint(s)
+    end
     -- auto-solver seam: when armed (main sets s.autopilot), advance the driver
     -- ONE step per SETTLED tick (the early returns above mean this is only
     -- reached when motion has settled and the lock is alive and not opened).

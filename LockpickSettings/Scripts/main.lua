@@ -183,6 +183,15 @@ local FreshPieces = {} -- piece actors by spawn time, see the notify below
 local FreshAbility = nil -- the most recently spawned open/door ability
 local FreshTask = nil -- the CURRENT minigame task (notify-captured)
 local StartSnap = nil -- slot snapshot of the previous start attempt
+-- Lazy session: the heavy solver path (FindAllOf, geometry, 25ms poll) is skipped
+-- on every lock open unless hints, connections, or full-auto need it, or the
+-- player presses F6 / toggles a feature mid-lock.
+local sessionStartForced = false
+local pendingAutoSolve = false
+
+local function trackingWanted()
+    return flags.nextMove or flags.connections or autoEvery
+end
 
 -- the auto-solver instance (main owns it, like the live session). It presses the
 -- CURRENT task through the main-owned FreshTask cache, liveness checked per call
@@ -213,10 +222,12 @@ local function schedule(ms, fn)
 end
 
 -- --------------------------------------------------------------- start flow --
--- The session ALWAYS runs while a minigame is open (state tracking is cheap);
--- the hotkey only toggles whether the green is painted.
+-- Session tracking runs while a minigame is open when hints, connections,
+-- full-auto, or F6 need it. With all three off, only the durability boost runs
+-- on open (no FindAllOf storm, no poll loop) until the player asks for more.
 local function tryStart(attempt)
     if NextMoveBroken or liveSession ~= nil then return end
+    if not trackingWanted() and not sessionStartForced then return end
     local lockName = Engine.currentLockName(FreshTask, FreshAbility)
     local graph = lockName and LockGraphs[lockName]
     if not graph then
@@ -225,6 +236,8 @@ local function tryStart(attempt)
         else
             log("Lock name not readable, next-move hint off for this lock")
         end
+        sessionStartForced = false
+        pendingAutoSolve = false
         return
     end
     -- THE SCRAMBLE ANIMATION GATE: at start the pieces may still be GLIDING
@@ -262,6 +275,8 @@ local function tryStart(attempt)
                 else
                     log("Lock pieces never settled, next-move hint off "
                         .. "for this lock")
+                    sessionStartForced = false
+                    pendingAutoSolve = false
                 end
                 return
             end
@@ -356,10 +371,19 @@ local function tryStart(attempt)
     -- ends, only if it is still the live one
     s.onStop = function() if liveSession == s then liveSession = nil end end
     liveSession = s
+    sessionStartForced = false
     s.tinter:retint(s)
     log(string.format("Next-move hint: %s, %d pieces, %d connections, first hint: %s",
         lockName, s.pieceCount, #graph.connections,
         s.nextMove and ("piece " .. s.nextMove.piece) or "none"))
+    if pendingAutoSolve and driver then
+        pendingAutoSolve = false
+        if not s.stateUnknown and s.hintGeometry then
+            pcall(function() driver:toggleFast(s) end)
+        else
+            log("Auto-solve: lock state not usable for this lock")
+        end
+    end
     -- full-auto-every-lock: if armed, drive THIS lock to open with the fast
     -- solver the instant it is tracked (the same path a manual F6 takes, at the
     -- safe point where the session is fully built and the geometry is resolved).
@@ -410,6 +434,15 @@ local function tryStart(attempt)
     end)
 end
 
+local function requestSessionStart(delayMs)
+    if NextMoveBroken or liveSession ~= nil then return end
+    sessionStartForced = true
+    schedule(delayMs or 100, function()
+        local ok, err = pcall(tryStart, 1)
+        if not ok then log("Next-move hint error: " .. tostring(err)) end
+    end)
+end
+
 -- ------------------------------------------------------------------ toggles --
 local lastToggle = 0
 local function toggleHint()
@@ -417,7 +450,11 @@ local function toggleHint()
     flags.nextMove = not flags.nextMove
     log("Next-move hint " .. (flags.nextMove and "ON" or "OFF"))
     local s = liveSession
-    if s and not s.stop then s:onHintToggled() end
+    if s and not s.stop then
+        s:onHintToggled()
+    elseif flags.nextMove then
+        requestSessionStart(100)
+    end
 end
 
 if type(HotkeyName) == "string" and HotkeyName ~= "" and not NextMoveBroken then
@@ -448,7 +485,11 @@ if type(ConnHotkeyName) == "string" and ConnHotkeyName ~= ""
                     flags.connections = not flags.connections
                     log("Connection display " .. (flags.connections and "ON" or "OFF"))
                     local s = liveSession
-                    if s and not s.stop then s:onConnectionsToggled() end
+                    if s and not s.stop then
+                        s:onConnectionsToggled()
+                    elseif flags.connections then
+                        requestSessionStart(100)
+                    end
                 end)
                 if not ok then log("Connection toggle error: " .. tostring(err)) end
             end)
@@ -475,7 +516,20 @@ if driver and type(AutoKey) == "string" and AutoKey ~= "" and Key[AutoKey] then
         if now - lastAutoSolve < 0.3 then return end
         lastAutoSolve = now
         ExecuteInGameThread(function()
-            pcall(function() driver:toggleFast(liveSession) end)
+            pcall(function()
+                if liveSession then
+                    driver:toggleFast(liveSession)
+                elseif pendingAutoSolve or sessionStartForced then
+                    pendingAutoSolve = false
+                    sessionStartForced = false
+                    log("Auto-solve cancelled")
+                elseif not NextMoveBroken then
+                    pendingAutoSolve = true
+                    requestSessionStart(0)
+                else
+                    log("Auto-solve: no active lock")
+                end
+            end)
         end)
     end)
     -- Shift+F6 (configurable modifier): toggle full-auto-every-lock
@@ -496,6 +550,9 @@ if driver and type(AutoKey) == "string" and AutoKey ~= "" and Key[AutoKey] then
                             .. (autoEvery and "ON" or "OFF"))
                         local s = liveSession
                         if autoEvery then
+                            if not s and not NextMoveBroken then
+                                requestSessionStart(100)
+                            end
                             -- arming mid-lock kicks off the current one if usable
                             if s and not s.stop and not s.opened
                                 and not s.stateUnknown and s.hintGeometry
@@ -705,7 +762,7 @@ local okNotify, errNotify = pcall(NotifyOnNewObject, "/Script/G1R.AbilityTask_Lo
             end)
             if not ok then log("Boost error: " .. tostring(err)) end
         end
-        if not NextMoveBroken then
+        if not NextMoveBroken and trackingWanted() then
             schedule(900, function()
                 local ok2, err2 = pcall(tryStart, 1)
                 if not ok2 then log("Next-move hint error: " .. tostring(err2)) end
