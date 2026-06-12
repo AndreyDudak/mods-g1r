@@ -256,17 +256,30 @@ local function FullName(Obj)
     return tostring(SafeCallMethod(Obj, "GetFullName") or "")
 end
 
-local function GetPlayerHudWidget()
-    local OkOne, One = pcall(function()
-        return FindFirstOf("Player_Widget_C")
-    end)
-    if OkOne and IsValidUObjectSafe(One) then
-        local Full = FullName(One)
-        if not string.find(Full, "Default__", 1, true)
-            and string.find(Full, "Transient", 1, true) == nil then
-            return One
-        end
+-- Real HUD = Player_Widget_C under GothicGameInstance (not the /Engine/Transient orphan after load).
+-- Do NOT exclude Transient in the path — the real widget lives there too.
+local CachedPlayerWidget = nil
+local HudScanGate = 0
+local HudRescanEvery = 3  -- min seconds between FindAllOf scans when cache misses
+
+local function IsRealHudWidget(Widget)
+    if not IsValidUObjectSafe(Widget) then
+        return false
     end
+    local Fn = FullName(Widget)
+    return string.find(Fn, "Player_UI", 1, true) ~= nil
+        and string.find(Fn, "GothicGameInstance", 1, true) ~= nil
+end
+
+local function GetPlayerHudWidget()
+    if IsRealHudWidget(CachedPlayerWidget) then
+        return CachedPlayerWidget
+    end
+    if IsValidUObjectSafe(CachedPlayerWidget) and HudScanGate > 0 then
+        HudScanGate = HudScanGate - 1
+        return CachedPlayerWidget
+    end
+    HudScanGate = HudRescanEvery
 
     local List = nil
     local OkAll, All = pcall(function()
@@ -274,35 +287,25 @@ local function GetPlayerHudWidget()
     end)
     if OkAll and type(All) == "table" then
         List = All
-    else
-        local OkOne, One = pcall(function()
-            return FindFirstOf("Player_Widget_C")
-        end)
-        if OkOne and IsValidUObjectSafe(One) then
-            List = { One }
-        end
     end
     if not List then
-        return nil
+        return CachedPlayerWidget
     end
 
-    local function Pick(Pred)
-        for _, Widget in ipairs(List) do
-            if IsValidUObjectSafe(Widget)
-                and not string.find(FullName(Widget), "Default__", 1, true)
-                and Pred(Widget) then
-                return Widget
-            end
+    for _, Widget in ipairs(List) do
+        if IsRealHudWidget(Widget) then
+            CachedPlayerWidget = Widget
+            return Widget
         end
-        return nil
     end
-
-    return Pick(function(Widget)
-        return string.find(FullName(Widget), "Player_UI", 1, true) ~= nil
-            and string.find(FullName(Widget), "Transient", 1, true) == nil
-    end) or Pick(function(Widget)
-        return string.find(FullName(Widget), "Transient", 1, true) == nil
-    end)
+    for _, Widget in ipairs(List) do
+        if IsValidUObjectSafe(Widget)
+            and not string.find(FullName(Widget), "Default__", 1, true) then
+            CachedPlayerWidget = Widget
+            return Widget
+        end
+    end
+    return CachedPlayerWidget
 end
 
 local function SyncResourceBar(AttrName, CurrentValue, MaxValue)
@@ -318,6 +321,7 @@ local function SyncResourceBar(AttrName, CurrentValue, MaxValue)
 
     local Bar = SafeGetMember(PlayerWidget, BarKey)
     if not IsValidUObjectSafe(Bar) then
+        CachedPlayerWidget = nil
         return
     end
 

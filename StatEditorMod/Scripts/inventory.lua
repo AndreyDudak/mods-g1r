@@ -1390,8 +1390,6 @@ function Inventory.ExecuteLookupLine(Line, Ar)
     end, Ar)
 end
 
-local MAX_ITEM_DELTA = 999
-
 local function ResolveWriteItemClass(Character, ItemInfo)
     if ItemInfo == nil then
         return nil, "no item info"
@@ -1446,10 +1444,6 @@ function Inventory.ExecuteLine(Line, Ar)
     end
     if Delta == 0 then
         Log("count must not be 0", Ar)
-        return
-    end
-    if math.abs(Delta) > MAX_ITEM_DELTA then
-        Log(string.format("count per command must be between -%d and %d", MAX_ITEM_DELTA, MAX_ITEM_DELTA), Ar)
         return
     end
 

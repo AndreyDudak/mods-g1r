@@ -603,7 +603,7 @@ Add new entries below as we find them.
 - Mana at 0: hidden cast gate cleared only via `GE_Item_Mana_Insta` GameplayEffect, not attribute write
 - Hero `m_IsAggressive` useless for combat; use `m_IsInCombat`, HP drop detection, or enemy `m_IsAggressive`
 - `FindAllOf` ~30 ms — cache HUD widget and enemy lists; rate-limit rescans
-- StatEditorMod `GetPlayerHudWidget()` still excludes `Transient` — may need same fix as PassiveRegen 1.0.5 if bars lag after load
+- StatEditorMod `GetPlayerHudWidget()` updated to match PassiveRegen 1.0.5 (`GothicGameInstance` + `Player_UI`, cached lookup)
 
 <!-- Template for new entries:
 ### YYYY-MM-DD — Short title
