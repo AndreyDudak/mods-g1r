@@ -3,9 +3,9 @@ local ModLog = require("modlog")
 
 local Console = {}
 
-local function Log(Message, Ar, Direct)
+local function Log(Message, Ar)
     local Line = "[StatEditorMod] " .. Message
-    ModLog.Write(Line, Direct == true)
+    ModLog.Write(Line)
     if Ar and type(Ar) == "userdata" and Ar:type() == "FOutputDevice" then
         Ar:Log(Line)
     end
@@ -100,32 +100,32 @@ local function HandleSet(StatName, ValueText, Ar)
         local Ok, Err = Stats.WriteStat(Character, Def.set, Def.attr, Value)
         if Ok then
             if Def.label == "MagicianLevel" and Err and Err ~= "" then
-                Log(string.format("MagicianLevel = %.0f (%s)", Value, Err), Output, true)
+                Log(string.format("MagicianLevel = %.0f (%s)", Value, Err), Output)
             else
-                Log(string.format("%s = %.2f", Def.label, Value), Output, true)
+                Log(string.format("%s = %.2f", Def.label, Value), Output)
             end
             return
         end
 
-        Log(string.format("Write failed for %s: %s", Def.label, Err or "unknown"), Output, true)
+        Log(string.format("Write failed for %s: %s", Def.label, Err or "unknown"), Output)
     end)
 end
 
 function Console.DumpAll(Ar)
     RequirePlayer(Ar, function(Character, Output)
-        ModLog.BeginBatch(true)
-        Log("--- stats ---", Output, true)
+        ModLog.BeginBatch()
+        Log("--- stats ---", Output)
         local Count = 0
         for _, Def in ipairs(Stats.STAT_DEFS) do
             local Value, Err = Stats.ReadStat(Character, Def.set, Def.attr)
             if Value ~= nil then
-                Log(string.format("%s = %.2f", Def.label, Value), Output, true)
+                Log(string.format("%s = %.2f", Def.label, Value), Output)
                 Count = Count + 1
             else
-                Log(string.format("%s = ? (%s)", Def.label, Err or "read failed"), Output, true)
+                Log(string.format("%s = ? (%s)", Def.label, Err or "read failed"), Output)
             end
         end
-        Log(string.format("Stats dump: %d values", Count), Output, true)
+        Log(string.format("Stats dump: %d values", Count), Output)
         ModLog.EndBatch()
     end)
 end

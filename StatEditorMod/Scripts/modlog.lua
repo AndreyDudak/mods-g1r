@@ -4,7 +4,6 @@ local ModLog = {}
 
 local BatchDepth = 0
 local BatchLines = {}
-local BatchDirect = false
 
 local HUD_SINGLE_MAX = 220
 local HUD_BLOCK_MAX = 1000
@@ -27,20 +26,7 @@ local function TrimHudBlock(Message)
     return Block
 end
 
-local function ShowHud(Message, Direct)
-    if Message == nil or Message == "" then
-        return
-    end
-
-    if Direct then
-        Notifications.Display(Message)
-        return
-    end
-
-    Notifications.TryShow(Message)
-end
-
-local function PushHudLine(Line, Direct)
+local function PushHudLine(Line)
     if Line == "" then
         return
     end
@@ -54,14 +40,13 @@ local function PushHudLine(Line, Direct)
     if #Single > HUD_SINGLE_MAX then
         Single = string.sub(Single, 1, HUD_SINGLE_MAX - 3) .. "..."
     end
-    ShowHud(Single, Direct)
+    Notifications.TryShow(Single)
 end
 
-function ModLog.BeginBatch(Direct)
+function ModLog.BeginBatch()
     BatchDepth = BatchDepth + 1
     if BatchDepth == 1 then
         BatchLines = {}
-        BatchDirect = Direct == true
     end
 end
 
@@ -73,9 +58,7 @@ function ModLog.EndBatch()
     BatchDepth = BatchDepth - 1
     if BatchDepth == 0 and #BatchLines > 0 then
         local Block = table.concat(BatchLines, "\n")
-        if BatchDirect then
-            ShowHud(TrimHudBlock(Block), true)
-        elseif #BatchLines > HUD_BATCH_LINE_MAX or #Block > HUD_BLOCK_MAX then
+        if #BatchLines > HUD_BATCH_LINE_MAX or #Block > HUD_BLOCK_MAX then
             Notifications.TryShow(string.format(
                 "[StatEditorMod] %d lines -> UE4SS.log",
                 #BatchLines
@@ -84,18 +67,17 @@ function ModLog.EndBatch()
             Notifications.TryShow(TrimHudBlock(Block))
         end
         BatchLines = {}
-        BatchDirect = false
     end
 end
 
-function ModLog.Write(Message, Direct)
+function ModLog.Write(Message)
     local Text = Message or ""
     if not string.match(Text, "\n$") then
         Text = Text .. "\n"
     end
     print(Text)
 
-    PushHudLine(TrimHudLine(Text), Direct == true)
+    PushHudLine(TrimHudLine(Text))
 end
 
 return ModLog
