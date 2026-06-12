@@ -39,6 +39,12 @@ local ModVersion = "3.1.2"
 -- snappier, raise it if play hitches.
 local POLL_MS = 25
 local POLL_NORMAL_EVERY = math.max(1, math.floor(400 / POLL_MS + 0.5)) -- ~400ms normal
+-- Prefetch: build the solver session in the background ~1.2s after a lock opens so
+-- F6 only arms the driver (instant) instead of running FindAllOf + geometry on the
+-- keypress. Idle poll stays slow until auto-solve or hints need tighter cadence.
+local PREFETCH_MS = 1050
+local SCRAMBLE_SKIP_AGE = 1.0 -- minigame age before a single snapshot suffices
+local POLL_IDLE_MS = 2000     -- poll cadence when session exists but nothing is painted
 
 -- ---------------------------------------------------- vendored shared kit --
 -- This mod ships its OWN copy of the kit under <Mod>/shared/kit/ (deploy.ps1
@@ -193,6 +199,16 @@ local function trackingWanted()
     return flags.nextMove or flags.connections or autoEvery
 end
 
+local function prefetchWanted()
+    return driver and not trackingWanted()
+end
+
+local function minigameAlive()
+    if not FreshTask or os.clock() - FreshTask.t > 120.0 then return false end
+    local ok, valid = pcall(function() return FreshTask.obj:IsValid() end)
+    return ok and valid
+end
+
 -- the auto-solver instance (main owns it, like the live session). It presses the
 -- CURRENT task through the main-owned FreshTask cache, liveness checked per call
 -- in the adapter. The hotkeys below arm it by setting liveSession.autopilot; the
@@ -228,6 +244,11 @@ end
 local function tryStart(attempt)
     if NextMoveBroken or liveSession ~= nil then return end
     if not trackingWanted() and not sessionStartForced then return end
+    if not minigameAlive() then
+        sessionStartForced = false
+        pendingAutoSolve = false
+        return
+    end
     local lockName = Engine.currentLockName(FreshTask, FreshAbility)
     local graph = lockName and LockGraphs[lockName]
     if not graph then
@@ -243,7 +264,10 @@ local function tryStart(attempt)
     -- THE SCRAMBLE ANIMATION GATE: at start the pieces may still be GLIDING
     -- into their scrambled columns. A baseline captured mid-glide poisons that
     -- piece's measured rotation for the whole session. Proceed only once two
-    -- snapshots ~450ms apart agree for every slot.
+    -- snapshots ~450ms apart agree for every slot. After ~1s the animation is
+    -- always done, so a single read is enough (F6 prefetch and late starts).
+    local taskAge = FreshTask and (os.clock() - FreshTask.t) or 0
+    if taskAge < SCRAMBLE_SKIP_AGE then
     do
         local lib0, mpc0, scene0 = Engine.mpcHandles()
         if lib0 then
@@ -281,6 +305,7 @@ local function tryStart(attempt)
                 return
             end
         end
+    end
     end
     -- only actors born for THIS minigame may be read: FindAllOf also returns the
     -- actors of earlier minigames, which contaminated the second lock of a run.
@@ -372,10 +397,14 @@ local function tryStart(attempt)
     s.onStop = function() if liveSession == s then liveSession = nil end end
     liveSession = s
     sessionStartForced = false
-    s.tinter:retint(s)
-    log(string.format("Next-move hint: %s, %d pieces, %d connections, first hint: %s",
-        lockName, s.pieceCount, #graph.connections,
-        s.nextMove and ("piece " .. s.nextMove.piece) or "none"))
+    if flags.nextMove or flags.connections then
+        s.tinter:retint(s)
+    end
+    if trackingWanted() or DebugSolver then
+        log(string.format("Next-move hint: %s, %d pieces, %d connections, first hint: %s",
+            lockName, s.pieceCount, #graph.connections,
+            s.nextMove and ("piece " .. s.nextMove.piece) or "none"))
+    end
     if pendingAutoSolve and driver then
         pendingAutoSolve = false
         if not s.stateUnknown and s.hintGeometry then
@@ -412,8 +441,13 @@ local function tryStart(attempt)
         pollWakes = pollWakes + 1
         local ap = s.autopilot
         local fast = ap and ap.mode == "fast"
-        if not fast and (pollWakes % POLL_NORMAL_EVERY) ~= 0 then
-            return false -- normal cadence: no game-thread work this wake
+        local tickEvery = POLL_NORMAL_EVERY
+        if not fast and not flags.nextMove and not flags.connections then
+            tickEvery = math.max(POLL_NORMAL_EVERY,
+                math.floor(POLL_IDLE_MS / POLL_MS + 0.5))
+        end
+        if not fast and (pollWakes % tickEvery) ~= 0 then
+            return false -- normal/idle cadence: no game-thread work this wake
         end
         -- re-entrancy guard: at the aggressive fast cadence a wake can arrive
         -- before the previous tick finished on the game thread. Skip it so ticks
@@ -740,6 +774,9 @@ local okNotify, errNotify = pcall(NotifyOnNewObject, "/Script/G1R.AbilityTask_Lo
     function(task)
         pcall(function()
             FreshTask = { obj = task, t = os.clock() }
+            StartSnap = nil
+            pendingAutoSolve = false
+            sessionStartForced = false
             -- one minigame exists at a time: a NEW task is hard proof any
             -- tracked session is stale (its close signal was missed, or an
             -- opened lock's actors linger). Free the slot WITHOUT touching the
@@ -762,11 +799,21 @@ local okNotify, errNotify = pcall(NotifyOnNewObject, "/Script/G1R.AbilityTask_Lo
             end)
             if not ok then log("Boost error: " .. tostring(err)) end
         end
-        if not NextMoveBroken and trackingWanted() then
-            schedule(900, function()
-                local ok2, err2 = pcall(tryStart, 1)
-                if not ok2 then log("Next-move hint error: " .. tostring(err2)) end
-            end)
+        if not NextMoveBroken then
+            if trackingWanted() then
+                schedule(900, function()
+                    local ok2, err2 = pcall(tryStart, 1)
+                    if not ok2 then log("Next-move hint error: " .. tostring(err2)) end
+                end)
+            elseif prefetchWanted() then
+                -- background session for F6: cost lands ~1.2s after open, not on F6
+                schedule(PREFETCH_MS, function()
+                    if liveSession or not minigameAlive() then return end
+                    sessionStartForced = true
+                    local ok2, err2 = pcall(tryStart, 1)
+                    if not ok2 then log("Next-move hint error: " .. tostring(err2)) end
+                end)
+            end
         end
     end)
 if not okNotify then
