@@ -159,6 +159,7 @@ local C = { pawn = nil, asc = nil, health = nil, mana = nil, strength = nil, ani
 -- Ticks since the last combat action (for the cooldown). Start high -> regen allowed immediately.
 local ticksSinceCombat = 1e9
 local hpTickCounter, mpTickCounter = 0, 0  -- count base ticks for the separate HP/MP clocks
+local lastHp = nil          -- previous Health reading, to detect "took damage" cheaply (no scan)
 
 local function getPawn()
     local ok, pc = pcall(UEHelpers.GetPlayerController)   -- throws in the menu -> pcall
@@ -209,42 +210,40 @@ end
 -- redraws number + full bar. (The old Reset() crashes on this build.)
 local barProp = { Health = "W_HealthBar", Mana = "W_ManaBar" }
 
--- The REAL on-screen HUD lives under ...GothicGameInstance...Player_UI.WidgetTree. After loading a
--- savegame an orphaned Player_Widget_C can linger under /Engine/Transient -> updating it is
--- invisible (only the shaded/lag bar follows). So pick the instance with "Player_UI" in its path.
+-- The REAL on-screen HUD is the Player_UI widget that lives UNDER the persistent GothicGameInstance
+-- (e.g. ".../GothicGameInstance_C_*.Player_UI"). After loading a savegame an orphaned copy lingers as
+-- the bare "/Engine/Transient.Player_UI" (Player_UI in the name but NOT under GothicGameInstance);
+-- updating that one is invisible -> only the shaded/lag bar follows. Verified in-game: BOTH live under
+-- /Engine/Transient and IsInViewport() returns nil for both, so the GameInstance parent is the reliable
+-- discriminator (not "Transient", not IsInViewport).
 local function fullName(o) return tostring(safe(function() return o:GetFullName() end, "")) end
 local function isRealHud(w)
     if not isUObject(w) then return false end
-    if string.find(fullName(w), "Player_UI", 1, true) == nil then return false end
-    local inVp = safe(function() return w:IsInViewport() end, nil)
-    return inVp ~= false  -- if IsInViewport isn't callable (nil), accept by name
+    local fn = fullName(w)
+    return string.find(fn, "Player_UI", 1, true) ~= nil
+        and string.find(fn, "GothicGameInstance", 1, true) ~= nil
 end
 
-local function inViewport(w) return isUObject(w) and safe(function() return w:IsInViewport() end, false) == true end
-local function isOrphan(w) return string.find(fullName(w), "Transient", 1, true) ~= nil end  -- /Engine/Transient leftover after a load
+-- HUD widget lookup. The cache MUST hold, otherwise the expensive FindAllOf (~30 ms!) runs every
+-- regen tick. Hard-won rules from past stutter bugs:
+--   * Do NOT disqualify widgets by "Transient" in the path: the REAL HUD itself lives under
+--     /Engine/Transient, so excluding it made the cache miss every tick -> per-tick FindAllOf (1.0.4 bug).
+--   * If isRealHud ever fails to match (e.g. a setup where the HUD path differs), RATE-LIMIT the re-scan
+--     so it can never become a per-tick FindAllOf - at most once every few seconds, and self-healing.
+local hudScanGate = 0
 local function getPlayerWidget()
-    if isRealHud(C.playerWidget) and not isOrphan(C.playerWidget) then return C.playerWidget end
-    C.playerWidget = nil
+    if isRealHud(C.playerWidget) then return C.playerWidget end  -- ideal: real HUD cached -> no FindAllOf
+    if isUObject(C.playerWidget) and hudScanGate > 0 then hudScanGate = hudScanGate - 1; return C.playerWidget end
+    hudScanGate = math.max(1, math.floor(3000 / Config.tickIntervalMs))  -- >=3s between scans -> never per-tick
     local list = safe(function() return FindAllOf("Player_Widget_C") end, nil)
-    if not list then return nil end
-    local function pick(pred)
-        for _, w in ipairs(list) do
-            if isUObject(w) and not string.find(fullName(w), "Default__", 1, true) and pred(w) then
-                C.playerWidget = w; return w
-            end
-        end
-        return nil
+    if not list then return C.playerWidget end
+    for _, w in ipairs(list) do  -- 1) the real GothicGameInstance HUD (excludes the /Engine/Transient orphan)
+        if isRealHud(w) then C.playerWidget = w; return w end
     end
-    -- 1) the real on-screen Player_UI HUD (not the transient orphan)
-    return pick(function(w) return isRealHud(w) and not isOrphan(w) end)
-        -- 2) anything actually in the viewport (visible) - the orphan is not
-        or pick(function(w) return inViewport(w) and not isOrphan(w) end)
-        -- 3) a Player_UI instance that isn't the orphan (covers IsInViewport being unreliable after a load)
-        or pick(function(w) return string.find(fullName(w), "Player_UI", 1, true) ~= nil and not isOrphan(w) end)
-        -- 4) last resort: any non-default, non-orphan instance
-        or pick(function(w) return not isOrphan(w) end)
-        -- 5) absolute last resort: anything non-default (better a stale update than none)
-        or pick(function() return true end)
+    for _, w in ipairs(list) do  -- 2) fallback: any non-Default instance (held until a real one appears)
+        if isUObject(w) and not string.find(fullName(w), "Default__", 1, true) then C.playerWidget = w; return w end
+    end
+    return C.playerWidget
 end
 
 local function callBarUpdate(bar)
@@ -330,6 +329,10 @@ local function clearManaGate()
 end
 
 -- ---------- State checks (cheap, readable AnimInstance bools) ----------
+-- "In combat" = the hero's own combat action (m_IsInCombat). NOTE: the hero's own m_IsAggressive is
+-- NOT usable - in-game it stays true even when peaceful (weapon drawn / lingers after a fight), so it
+-- would wrongly block regen out of combat. We rely instead on m_IsInCombat + the "took damage" check
+-- (in runTick) + the nearby-aggressive-ENEMY scan.
 local function isInCombat()
     if not isUObject(C.anim) then return false end
     return safe(function() return C.anim.m_IsInCombat end, false) == true
@@ -377,7 +380,11 @@ local function dist(a, b)
 end
 local enemyList, enemyListAge = nil, 1e9
 local function isEnemyAggro()
-    local refreshEvery = math.max(1, math.floor(5000 / Config.tickIntervalMs))
+    -- Refresh the EXPENSIVE list (~30 ms FindAllOf) only ~once per combat-cooldown window; between
+    -- refreshes we just re-read m_IsAggressive on the cached pointers (cheap), so detection stays
+    -- responsive every tick. Already-present chasers are caught immediately; only a brand-new enemy
+    -- that aggros mid-window waits up to one refresh.
+    local refreshEvery = math.max(1, math.floor(Config.combatCooldownSeconds * 1000 / Config.tickIntervalMs))
     enemyListAge = enemyListAge + 1
     if not enemyList or enemyListAge >= refreshEvery then
         enemyList = safe(function() return FindAllOf("AIAgentCharacter") end, nil)
@@ -427,9 +434,15 @@ local function runTick()
         if hpDue then hpTickCounter = 0 end
         if mpDue then mpTickCounter = 0 end
 
-        -- Maintain the combat cooldown every base tick (cheap own-combat flag), independent of
-        -- which resource is due, so timing stays correct even with large HP/MP intervals.
-        if isInCombat() then ticksSinceCombat = 0 end
+        -- Combat activity = your own attack OR taking damage -> reset the cooldown and re-arm the aggro
+        -- scan. Runs every base tick (a cheap property read, ~0 ms). This makes "being hit" pause regen
+        -- even if you never swing - which the IsInCombat flag alone misses. Our own regen only RAISES
+        -- HP, so any drop can only be real damage.
+        local hpNow = safe(function() return C.health.Health.CurrentValue end, nil)
+        if isInCombat() or (hpNow ~= nil and lastHp ~= nil and hpNow < lastHp - 0.001) then
+            ticksSinceCombat = 0
+        end
+        lastHp = hpNow
 
         if not hpDue and not mpDue then return end  -- nothing due this base tick
 
@@ -448,9 +461,12 @@ local function runTick()
         local needMp = mpDue and mpCur ~= nil and mpMax ~= nil and mpCur < mpMax and maxManaOk()  -- mana: from 0 too
         if not needHp and not needMp then return end
 
-        -- Aggro: own-combat already reset ticksSinceCombat above. While still inside the post-combat
-        -- window, an aggressive nearby enemy keeps the block alive (extends the cooldown). The
-        -- expensive enemy scan only runs in this narrow window. Disabled via AggroBlocksRegen.
+        -- Aggro: while inside the post-combat window, check the nearby enemies EVERY tick so a still-
+        -- aggressive enemy reliably keeps the block alive (a single scan per window was too fragile - it
+        -- missed enemies whose flag flickered). This is cheap: the per-tick check only re-reads
+        -- m_IsAggressive on CACHED enemy pointers; the expensive FindAllOf only refreshes that list ~once
+        -- per CombatCooldownSeconds (see isEnemyAggro). No scan while you fight (own-combat/damage hold
+        -- the reset) or once peaceful (window expired). Disabled entirely via AggroBlocksRegen.
         local cooldownTicks = math.ceil(Config.combatCooldownSeconds * 1000 / Config.tickIntervalMs)
         if Config.aggroBlocksRegen and ticksSinceCombat > 0 and ticksSinceCombat < cooldownTicks then
             if isEnemyAggro() then ticksSinceCombat = 0 end
@@ -525,5 +541,5 @@ local function selfCheck()
 end
 pcall(selfCheck)
 
-print(string.format("[PassiveRegen] v1.0.4 loaded (HP/Mana %%, separate clocks, HUD sync, combat cooldown, death/KO, pause/cutscene stop). Toggle = %s.\n",
+print(string.format("[PassiveRegen] v1.0.5 loaded (HP/Mana %%, separate clocks, HUD sync, combat cooldown, death/KO, pause/cutscene stop). Toggle = %s.\n",
     toggleKeyLabel))

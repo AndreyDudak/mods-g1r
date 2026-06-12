@@ -463,6 +463,85 @@ Caveats: some stats may clamp or revert via gameplay systems; `MaxHealth` vs `He
 
 ---
 
+## HP/Mana write + HUD sync (PassiveRegen v1.0.5, external mod)
+
+Reference: [Passive Regeneration](https://www.nexusmods.com/gothic1remake/mods/60) (Nexus #60) — not our mod; useful patterns for any stat/HUD Lua work.
+
+### Direct AttributeSet write (works on G1R)
+
+Stats are `FGameplayAttributeData` on spawned AttributeSets. Write **both** fields:
+
+```lua
+set.Health.BaseValue = nv
+set.Health.CurrentValue = nv
+```
+
+Resolve sets via `pawn.Mesh.AbilityComp` → `SpawnedAttributes:ForEach`, match class name (`AttributeSet_Health`, `AttributeSet_Mana`, …). StatEditorMod also tries `GetAbilitySystemComponent()` and `CharacterState.AbilitySystemComponent`.
+
+### HUD bar refresh (required after direct write)
+
+Path: `Player_Widget_C` → `W_HealthBar` / `W_ManaBar` (`UGameplayAttributeProgressBarWidget`).
+
+Set cached fields, then call BP **`Update Value`** (space in name!) or fallback `UpdateValue`. **`Reset()` crashes** on this build.
+
+```lua
+bar.m_GameplayAttributeCurrentValue = cur
+bar.m_GameplayAttributeMaxValue = max
+bar.m_GameplayAttributeCurrentPercent = cur / max
+bar.m_GameplayAttributeInterpolatedPercent = cur / max
+bar["Update Value"](bar)  -- or UpdateValue
+```
+
+### Which `Player_Widget_C` is the real HUD?
+
+After loading a save, an **orphan** copy exists as `/Engine/Transient.Player_UI` (name matches but **not** under `GothicGameInstance`). Updating it only moves the faint shadow fill; numbers stay wrong.
+
+| Check | Result |
+|---|---|
+| `IsInViewport()` | **nil for both** real and orphan — do not use |
+| Path contains `GothicGameInstance` **and** `Player_UI` | **real** on-screen HUD |
+| Exclude all `Transient` paths | **wrong** — real HUD also lives under `/Engine/Transient` (1.0.4 stutter bug) |
+
+Cache the widget; `FindAllOf("Player_Widget_C")` costs ~30 ms. Re-scan at most every ~3 s, never every tick.
+
+### “Out of mana” cast gate
+
+When mana hits **0**, a hidden GAS gate blocks casting. Direct attribute refill **does not** clear it — need a mana GameplayEffect (what potions do).
+
+- Find `ItemEffectDefinition` whose full name contains `GE_Item_Mana_Insta` → use `d.m_Effect`
+- Apply via reflected `AbilitySystemComponent:MakeEffectContext` + `BP_ApplyGameplayEffectToSelf`
+- Direct `asc:MakeEffectContext()` can crash with *"Array failed invariants"* on some UE4SS builds — use `StaticFindObject("Function …")` + `CallFunction` / `fn(asc, …)` (which form works is setup-dependent; cache the winner)
+
+### Combat / state flags (AnimInstance on `pawn.Mesh`)
+
+| Field | On | Meaning |
+|---|---|---|
+| `m_IsInCombat` | hero | own attack / combat action |
+| `m_IsAggressive` | hero | **unreliable** — stays true when peaceful (weapon drawn) |
+| `m_IsAggressive` | `AIAgentCharacter` enemy | enemy chasing / fighting |
+| `m_IsAlive` | hero | `false` = dead **or** K.O. |
+| `bIsInCinematic` / `bIsInConversation` | hero | cutscene / dialogue |
+
+Cheap “took damage” without scans: compare previous vs current `Health.CurrentValue` (mod regen only raises HP, so any drop is real damage).
+
+Pause: `UEHelpers.GetGameplayStatics():IsGamePaused(pawn:GetWorld())`.
+
+Enemy aggro scan: `FindAllOf("AIAgentCharacter")` is expensive — cache list, refresh ~once per combat-cooldown window; per tick only re-read `enemy.Mesh.AnimScriptInstance.m_IsAggressive`.
+
+### Reflective UFunction calls (UE4SS quirk)
+
+Some installs need `obj:CallFunction(fn, …)`, others `fn(obj, …)`. Try both once per function path and remember the form that succeeded (avoids log spam).
+
+### PassiveRegen v1.0.5 changelog (Nexus)
+
+- Fixed 1.0.4 stutter: HUD lookup was running expensive scan every tick
+- Fixed post-loadsave bars showing only shadow fill (real HUD vs orphan)
+- Taking damage now pauses regen (not only own attacks)
+- Cheaper aggro: expensive enemy scan at most ~once per combat cooldown
+- INI tip: `AggroBlocksRegen=false` disables enemy scan entirely (combat still detected via hero flags + damage)
+
+---
+
 ## Known issues
 
 - `FUObjectHashTables::Get()` not found in log — warning only, game runs
@@ -514,6 +593,17 @@ Add new entries below as we find them.
 - Numpad **5** open shows comma-separated stat alias list on HUD
 - Deploy: `deploy.ps1 -Steam` from git repo → Steam + local `ue4ss\Mods\StatEditorMod\`
 - Avoid `HUDNotificationController` / `MakeInstancedStruct` / `PrintString` from Lua (see HUD section above)
+
+### 2026-06-12 — PassiveRegen v1.0.5 (external, Nexus #60)
+
+- User updated third-party PassiveRegen; extracted patterns into **HP/Mana write + HUD sync** section above
+- Real HUD = `Player_Widget_C` under `GothicGameInstance`, not bare `/Engine/Transient.Player_UI` orphan after load
+- Do **not** filter out `Transient` in HUD lookup — real widget path includes it; use `GothicGameInstance` + `Player_UI` instead
+- `Reset()` on health/mana bars crashes; use `Update Value` / `UpdateValue`
+- Mana at 0: hidden cast gate cleared only via `GE_Item_Mana_Insta` GameplayEffect, not attribute write
+- Hero `m_IsAggressive` useless for combat; use `m_IsInCombat`, HP drop detection, or enemy `m_IsAggressive`
+- `FindAllOf` ~30 ms — cache HUD widget and enemy lists; rate-limit rescans
+- StatEditorMod `GetPlayerHudWidget()` still excludes `Transient` — may need same fix as PassiveRegen 1.0.5 if bars lag after load
 
 <!-- Template for new entries:
 ### YYYY-MM-DD — Short title
