@@ -122,6 +122,27 @@ Stats.ALIASES = {
     magician = "MagicianLevel",
     magicianlevel = "MagicianLevel",
     magiclevel = "MagicianLevel",
+    blunt = "ResBlunt",
+    rblunt = "ResBlunt",
+    resblunt = "ResBlunt",
+    point = "ResPoint",
+    rpoint = "ResPoint",
+    respoint = "ResPoint",
+    energy = "ResEnergy",
+    renergy = "ResEnergy",
+    resenergy = "ResEnergy",
+    wind = "ResWind",
+    rwind = "ResWind",
+    reswind = "ResWind",
+    edge = "ResEdge",
+    redge = "ResEdge",
+    resedge = "ResEdge",
+    fire = "ResFire",
+    rfire = "ResFire",
+    resfire = "ResFire",
+    ice = "ResIce",
+    rice = "ResIce",
+    resice = "ResIce",
 }
 
 Stats.STAT_DEFS = {
@@ -138,6 +159,13 @@ Stats.STAT_DEFS = {
     { label = "Toughness",   set = "/Script/G1R.AttributeSet_LevelProgression", attr = "Toughness" },
     { label = "Fatigue",     set = "/Script/G1R.AttributeSet_Fatigue",          attr = "Fatigue" },
     { label = "MaxFatigue",  set = "/Script/G1R.AttributeSet_Fatigue",          attr = "MaxFatigue" },
+    { label = "ResBlunt",    set = "/Script/G1R.AttributeSet_Armor",            attr = "Resistance_Blunt" },
+    { label = "ResPoint",    set = "/Script/G1R.AttributeSet_Armor",            attr = "Resistance_Point" },
+    { label = "ResEnergy",   set = "/Script/G1R.AttributeSet_Armor",            attr = "Resistance_Energy" },
+    { label = "ResWind",     set = "/Script/G1R.AttributeSet_Armor",            attr = "Resistance_Wind" },
+    { label = "ResEdge",     set = "/Script/G1R.AttributeSet_Armor",            attr = "Resistance_Edge" },
+    { label = "ResFire",     set = "/Script/G1R.AttributeSet_Armor",            attr = "Resistance_Fire" },
+    { label = "ResIce",      set = "/Script/G1R.AttributeSet_Armor",            attr = "Resistance_Ice" },
 }
 
 local function NormalizeQuery(Query)
@@ -516,6 +544,24 @@ function Stats.WriteStat(Character, SetPath, AttrName, NewValue)
         return Skills.SetMagicCircleLevel(Character, NewValue)
     end
     return Stats.WriteAttribute(Character, SetPath, AttrName, NewValue)
+end
+
+local ArmorSetPath = "/Script/G1R.AttributeSet_Armor"
+
+function Stats.WriteAllResists(Character, NewValue)
+    local Applied = 0
+    local Failed = 0
+    for _, Def in ipairs(Stats.STAT_DEFS) do
+        if Def.set == ArmorSetPath then
+            local Ok = Stats.WriteStat(Character, Def.set, Def.attr, NewValue)
+            if Ok then
+                Applied = Applied + 1
+            else
+                Failed = Failed + 1
+            end
+        end
+    end
+    return Applied, Failed
 end
 
 function Stats.ReadAll(Character)

@@ -42,6 +42,8 @@ function Console.PrintModGuide(Ar)
     Log("Numpad 8: <pos> <count> + Enter  (e.g. 18 55 or 18 -10)  Esc=close", Ar)
     Log("Numpad 9: dump inventory list (open inventory tab first)", Ar)
     Log("Stat aliases: hp/mh, mp/mm, lp/sp, str, dex, lvl, exp/xp, tough, fatigue/mf, circle/magic/mc (0-6)", Ar)
+    Log("Resists (AttributeSet_Armor): blunt, point, energy, wind, edge, fire, ice  (or rblunt, rpoint, ...)", Ar)
+    Log("allres <value> — set all 7 resistances at once  (e.g. allres 50)", Ar)
     Log("Inventory pos = footer number (18/334), NOT internal id", Ar)
     Log("After .lua edits: Ctrl+R reloads Lua (full game restart if something breaks)", Ar)
     ModLog.EndBatch()
@@ -69,6 +71,7 @@ local function CollectAllAliases()
     for Alias in pairs(Stats.ALIASES) do
         Add(Alias)
     end
+    Add("allres")
 
     table.sort(List)
     return List
@@ -80,6 +83,25 @@ function Console.PrintStatAliases(Ar)
 end
 
 local function HandleSet(StatName, ValueText, Ar)
+    local Key = string.lower(StatName or "")
+    if Key == "allres" then
+        local Value = tonumber(ValueText)
+        if Value == nil then
+            Log(string.format("Invalid value '%s' for allres", ValueText), Ar)
+            return
+        end
+
+        RequirePlayer(Ar, function(Character, Output)
+            local Applied, Failed = Stats.WriteAllResists(Character, Value)
+            if Failed == 0 then
+                Log(string.format("All resistances = %.2f (%d stats)", Value, Applied), Output)
+            else
+                Log(string.format("All resistances: %d ok, %d failed (target %.2f)", Applied, Failed, Value), Output)
+            end
+        end)
+        return
+    end
+
     local Def = Stats.FindDefByQuery(StatName)
     if not Def then
         Log(string.format("Unknown stat '%s'", StatName), Ar)
@@ -177,6 +199,8 @@ local function RegisterAliasHandlers()
     for _, Def in ipairs(Stats.STAT_DEFS) do
         RegisterAlias(Def.label)
     end
+
+    RegisterAlias("allres")
 end
 
 RegisterAliasHandlers()
