@@ -39,12 +39,8 @@ local ModVersion = "3.1.2"
 -- snappier, raise it if play hitches.
 local POLL_MS = 25
 local POLL_NORMAL_EVERY = math.max(1, math.floor(400 / POLL_MS + 0.5)) -- ~400ms normal
--- Prefetch: build the solver session in the background ~1.2s after a lock opens so
--- F6 only arms the driver (instant) instead of running FindAllOf + geometry on the
--- keypress. Idle poll stays slow until auto-solve or hints need tighter cadence.
-local PREFETCH_MS = 1050
-local SCRAMBLE_SKIP_AGE = 1.0 -- minigame age before a single snapshot suffices
-local POLL_IDLE_MS = 2000     -- poll cadence when session exists but nothing is painted
+-- After ~1s the scramble animation is done; F6 can skip the two-snapshot gate.
+local SCRAMBLE_SKIP_AGE = 1.0
 
 -- ---------------------------------------------------- vendored shared kit --
 -- This mod ships its OWN copy of the kit under <Mod>/shared/kit/ (deploy.ps1
@@ -194,13 +190,10 @@ local StartSnap = nil -- slot snapshot of the previous start attempt
 -- player presses F6 / toggles a feature mid-lock.
 local sessionStartForced = false
 local pendingAutoSolve = false
+local minigameGen = 0 -- bumps on each minigame start; stale scheduled work bails out
 
 local function trackingWanted()
     return flags.nextMove or flags.connections or autoEvery
-end
-
-local function prefetchWanted()
-    return driver and not trackingWanted()
 end
 
 local function minigameAlive()
@@ -237,11 +230,35 @@ local function schedule(ms, fn)
     end)
 end
 
+local startSessionPoll
+local tryStart
+
+local function scheduleTryStart(ms, attempt)
+    local gen = minigameGen
+    schedule(ms, function()
+        if gen ~= minigameGen then return end
+        local ok, err = pcall(tryStart, attempt)
+        if not ok then log("Next-move hint error: " .. tostring(err)) end
+    end)
+end
+
+local function stopLiveSession(reason)
+    pendingAutoSolve = false
+    sessionStartForced = false
+    local s = liveSession
+    if not s or s.stop then return end
+    if driver and driver:running() then
+        pcall(function() driver:finish(s, reason or "minigame ended", false) end)
+    end
+    s.stop = true
+    liveSession = nil
+end
+
 -- --------------------------------------------------------------- start flow --
 -- Session tracking runs while a minigame is open when hints, connections,
 -- full-auto, or F6 need it. With all three off, only the durability boost runs
 -- on open (no FindAllOf storm, no poll loop) until the player asks for more.
-local function tryStart(attempt)
+tryStart = function(attempt)
     if NextMoveBroken or liveSession ~= nil then return end
     if not trackingWanted() and not sessionStartForced then return end
     if not minigameAlive() then
@@ -295,7 +312,7 @@ local function tryStart(attempt)
             end
             if not stable then
                 if attempt < 12 then
-                    schedule(450, function() pcall(tryStart, attempt + 1) end)
+                    scheduleTryStart(450, attempt + 1)
                 else
                     log("Lock pieces never settled, next-move hint off "
                         .. "for this lock")
@@ -359,7 +376,7 @@ local function tryStart(attempt)
         if reason == "retry" then
             -- too few pieces yet (still spawning): re-run the whole collection
             if attempt < 6 then
-                schedule(500, function() tryStart(attempt + 1) end)
+                scheduleTryStart(500, attempt + 1)
             else
                 -- never fail wordlessly: a boost without a session banner once
                 -- cost a debugging round
@@ -420,39 +437,38 @@ local function tryStart(attempt)
     if autoEvery and driver and not s.stateUnknown and s.hintGeometry then
         pcall(function() driver:toggleFast(s) end)
     end
-    -- the session poll. The worker wakes every POLL_MS but only does game-thread
-    -- work (the tick, cached references only) every POLL_NORMAL_EVERY wakes in
-    -- normal play (~400ms, as before); while FAST auto-solve is engaged it ticks
-    -- EVERY wake so the route executes as fast as moves are honoured. A session
-    -- that is no longer the live one, or stopped, returns true and the loop ends.
+    -- Poll only while hints/connections/full-auto or an active solve need it.
+    -- An F6-only session with no solve running must NOT leave a 25ms LoopAsync
+    -- behind (that caused menu hitches after leaving the minigame).
+    if trackingWanted() or (driver and driver:running()) then
+        startSessionPoll(s)
+    end
+end
+
+startSessionPoll = function(s)
+    if s.pollStarted then return end
+    s.pollStarted = true
     local pollWakes = 0
     LoopAsync(POLL_MS, function()
         if liveSession ~= s or s.stop then
-            -- one reliable end-of-session line on EVERY teardown path (solved and
-            -- looted, exited, evicted, world change). The driver's own "lock
-            -- solved" line is not guaranteed on a fast solve (the session can halt
-            -- before the driver's next step), so this is the authoritative "it is
-            -- off now" confirmation. Pairs with the start banner. Fires once: the
-            -- loop stops the moment it returns true.
+            log("Lockpick session ended for '" .. tostring(s.lockName)
+                .. "': tracking, hint and auto-solve off")
+            return true
+        end
+        local ap = s.autopilot
+        local fast = ap and ap.mode == "fast"
+        -- F6-only: once the solve stops and hints are off, kill the poll loop.
+        if not trackingWanted() and not fast then
+            s.stop = true
+            if liveSession == s then liveSession = nil end
             log("Lockpick session ended for '" .. tostring(s.lockName)
                 .. "': tracking, hint and auto-solve off")
             return true
         end
         pollWakes = pollWakes + 1
-        local ap = s.autopilot
-        local fast = ap and ap.mode == "fast"
-        local tickEvery = POLL_NORMAL_EVERY
-        if not fast and not flags.nextMove and not flags.connections then
-            tickEvery = math.max(POLL_NORMAL_EVERY,
-                math.floor(POLL_IDLE_MS / POLL_MS + 0.5))
+        if not fast and (pollWakes % POLL_NORMAL_EVERY) ~= 0 then
+            return false
         end
-        if not fast and (pollWakes % tickEvery) ~= 0 then
-            return false -- normal/idle cadence: no game-thread work this wake
-        end
-        -- re-entrancy guard: at the aggressive fast cadence a wake can arrive
-        -- before the previous tick finished on the game thread. Skip it so ticks
-        -- never queue or backlog; the effective rate self-throttles to the tick's
-        -- real cost (so POLL_MS can be set very low safely).
         if s.ticking then return false end
         s.ticking = true
         ExecuteInGameThread(function()
@@ -471,10 +487,7 @@ end
 local function requestSessionStart(delayMs)
     if NextMoveBroken or liveSession ~= nil then return end
     sessionStartForced = true
-    schedule(delayMs or 100, function()
-        local ok, err = pcall(tryStart, 1)
-        if not ok then log("Next-move hint error: " .. tostring(err)) end
-    end)
+    scheduleTryStart(delayMs or 100, 1)
 end
 
 -- ------------------------------------------------------------------ toggles --
@@ -552,6 +565,9 @@ if driver and type(AutoKey) == "string" and AutoKey ~= "" and Key[AutoKey] then
         ExecuteInGameThread(function()
             pcall(function()
                 if liveSession then
+                    if not liveSession.pollStarted then
+                        startSessionPoll(liveSession)
+                    end
                     driver:toggleFast(liveSession)
                 elseif pendingAutoSolve or sessionStartForced then
                     pendingAutoSolve = false
@@ -680,16 +696,7 @@ if not NextMoveBroken then
     -- dying task. The task-liveness gate in session.tick is the backstop for exit
     -- paths that do not route through BackPressed; this is the immediate one.
     tryHook("/Script/G1R.AbilityTask_LockPick:BackPressed", function()
-        pcall(function()
-            local s = liveSession
-            if not s or s.stop then return end
-            if driver and driver:running() then
-                driver:finish(s, "minigame exited by player", false)
-            end
-            s.stop = true
-            liveSession = nil
-            if DebugSolver then log("solver: BackPressed exit, session stopped") end
-        end)
+        pcall(function() stopLiveSession("minigame exited by player") end)
     end)
     -- the open signal: combined with aligned pins at session death it marks a
     -- TRUE open position
@@ -749,9 +756,7 @@ end
 -- world-change backstop: if a save is loaded, kill any session WITHOUT touching
 -- stored object wrappers (they may dangle after the GC purge)
 pcall(RegisterInitGameStatePostHook, function()
-    local s = liveSession
-    liveSession = nil
-    if s then s.stop = true end
+    stopLiveSession("world changed")
 end)
 
 -- --------------------------------------------------------------- triggers --
@@ -774,6 +779,7 @@ local okNotify, errNotify = pcall(NotifyOnNewObject, "/Script/G1R.AbilityTask_Lo
     function(task)
         pcall(function()
             FreshTask = { obj = task, t = os.clock() }
+            minigameGen = minigameGen + 1
             StartSnap = nil
             pendingAutoSolve = false
             sessionStartForced = false
@@ -799,21 +805,8 @@ local okNotify, errNotify = pcall(NotifyOnNewObject, "/Script/G1R.AbilityTask_Lo
             end)
             if not ok then log("Boost error: " .. tostring(err)) end
         end
-        if not NextMoveBroken then
-            if trackingWanted() then
-                schedule(900, function()
-                    local ok2, err2 = pcall(tryStart, 1)
-                    if not ok2 then log("Next-move hint error: " .. tostring(err2)) end
-                end)
-            elseif prefetchWanted() then
-                -- background session for F6: cost lands ~1.2s after open, not on F6
-                schedule(PREFETCH_MS, function()
-                    if liveSession or not minigameAlive() then return end
-                    sessionStartForced = true
-                    local ok2, err2 = pcall(tryStart, 1)
-                    if not ok2 then log("Next-move hint error: " .. tostring(err2)) end
-                end)
-            end
+        if not NextMoveBroken and trackingWanted() then
+            scheduleTryStart(900, 1)
         end
     end)
 if not okNotify then
