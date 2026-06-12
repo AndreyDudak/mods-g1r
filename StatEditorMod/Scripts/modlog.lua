@@ -2,6 +2,7 @@ local Notifications = require("notifications")
 
 local ModLog = {}
 
+local HudEnabled = true
 local BatchDepth = 0
 local BatchLines = {}
 
@@ -27,7 +28,7 @@ local function TrimHudBlock(Message)
 end
 
 local function PushHudLine(Line)
-    if Line == "" then
+    if not HudEnabled or Line == "" then
         return
     end
 
@@ -50,13 +51,31 @@ function ModLog.BeginBatch()
     end
 end
 
+function ModLog.IsHudEnabled()
+    return HudEnabled
+end
+
+function ModLog.SetHudEnabled(Enabled)
+    HudEnabled = Enabled == true
+end
+
+function ModLog.ToggleHud()
+    HudEnabled = not HudEnabled
+    local Line = string.format("[StatEditorMod] HUD messages %s", HudEnabled and "ON" or "OFF")
+    print(Line .. "\n")
+    if HudEnabled then
+        Notifications.TryShow(Line)
+    end
+    return HudEnabled
+end
+
 function ModLog.EndBatch()
     if BatchDepth <= 0 then
         return
     end
 
     BatchDepth = BatchDepth - 1
-    if BatchDepth == 0 and #BatchLines > 0 then
+    if BatchDepth == 0 and #BatchLines > 0 and HudEnabled then
         local Block = table.concat(BatchLines, "\n")
         if #BatchLines > HUD_BATCH_LINE_MAX or #Block > HUD_BLOCK_MAX then
             Notifications.TryShow(string.format(

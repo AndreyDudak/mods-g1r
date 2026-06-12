@@ -1,4 +1,4 @@
--- StatEditorMod: Numpad 0=guide | 5=stats | 6=dump stats | 7=slot | 8=inv edit | 9=inv list
+-- StatEditorMod: Numpad 0=guide | ./= HUD toggle | 5=stats | 6=dump | 7=slot | 8=inv | 9=list
 
 local Stats = require("stats")
 local Console = require("console")
@@ -20,6 +20,15 @@ RegisterKeyBind(Key.NUM_ZERO, function()
         Console.PrintModGuide(nil)
     end)
 end)
+
+local function ToggleHudMessages()
+    OnGameThread(function()
+        ModLog.ToggleHud()
+    end)
+end
+
+RegisterKeyBind(Key.DECIMAL, ToggleHudMessages)
+RegisterKeyBind(Key.DIVIDE, ToggleHudMessages)
 
 RegisterKeyBind(Key.NUM_SIX, function()
     OnGameThread(function()
@@ -51,4 +60,4 @@ RegisterLoadMapPostHook(function()
     end)
 end)
 
-ModLog.Write("[StatEditorMod] Numpad0=guide, Numpad6=stats, Numpad9=inv list, Numpad7=pos, Numpad8=inv")
+ModLog.Write("[StatEditorMod] Numpad0=guide, Numpad ./ = HUD on/off, Numpad6=stats, Numpad9=inv list, Numpad7=pos, Numpad8=inv")
